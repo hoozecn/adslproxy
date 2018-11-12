@@ -2,6 +2,7 @@ package adslproxy
 
 import (
 	"encoding/json"
+	"github.com/gorilla/mux"
 	"net/http"
 	"regexp"
 	"time"
@@ -55,7 +56,7 @@ func (h *RegexpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListNodesApi() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		nodes := s.ListNodes()
-		var data []nodePojo
+		var data = make([]nodePojo, 0)
 
 		for _, node := range nodes {
 			var forwardList []forwardPojo
@@ -84,16 +85,29 @@ func (s *Server) ListNodesApi() func(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) UpdateNodesApi() func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Add("Content-Type", "application/json")
-		w.WriteHeader(200)
+		vars := mux.Vars(r)
+		nodeId := vars["node_id"]
 
-		json.NewEncoder(w).Encode("")
+		node := s.FindNodeById(nodeId)
+		if node != nil {
+
+			switch r.Method {
+			case "UPDATE":
+				node.Redial()
+				w.WriteHeader(200)
+			default:
+				w.WriteHeader(400)
+			}
+		} else {
+			w.WriteHeader(404)
+		}
 	}
 }
 
 func (s *Server) apiHandler() http.Handler {
-	handler := &RegexpHandler{}
-	handler.HandleFunc(regexp.MustCompile("/api/nodes/$"), s.ListNodesApi())
-	handler.HandleFunc(regexp.MustCompile("/api/nodes/[^/]+/$"), s.UpdateNodesApi())
-	return handler
+	r := mux.NewRouter()
+
+	r.HandleFunc("/api/nodes/", s.ListNodesApi())
+	r.HandleFunc("/api/nodes/{node_id}/", s.UpdateNodesApi())
+	return r
 }

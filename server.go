@@ -75,6 +75,11 @@ func (n *Node) AddForwarding(msg ssh.NamedTunnelForwardMsg, listener *net.TCPLis
 	glog.Infof("A new forwarding is added %s via %s", f, n)
 }
 
+func (n *Node) Redial() {
+	n.conn.SendRequest(Reconnect, true, nil)
+	n.conn.Close()
+}
+
 type Server struct {
 	// SshAddr is the addr that agent registered to
 	SshAddr *net.TCPAddr
@@ -138,7 +143,7 @@ func parseUserId(u string) (user, id string, err error) {
 	return
 }
 
-func NewServer(addr *net.TCPAddr, token string) *Server {
+func NewServer(sshAddr *net.TCPAddr, httpAddr *net.TCPAddr, token string) *Server {
 	var server *Server
 
 	HostPriKey, _ := ssh.ParsePrivateKeyWithPassphrase(
@@ -169,7 +174,8 @@ func NewServer(addr *net.TCPAddr, token string) *Server {
 	config.AddHostKey(HostPriKey)
 
 	server = &Server{
-		SshAddr:   addr,
+		SshAddr:   sshAddr,
+		HttpAddr:  httpAddr,
 		Nodes:     list.New(),
 		sshConfig: config,
 	}
@@ -235,7 +241,11 @@ func (s *Server) Start() error {
 		}
 
 		go func() {
-			sshConn, channel, requests, err := ssh.NewServerConn(conn, s.sshConfig)
+			sshConn, channel, requests, err := ssh.NewServerConn(&Conn{
+				Conn:         conn,
+				ReadTimeout:  ReadTimeout,
+				WriteTimeout: WriteTimeout,
+			}, s.sshConfig)
 			if err != nil {
 				glog.Error("failed to create ssh conn ", err)
 				return
@@ -250,8 +260,9 @@ func (s *Server) Start() error {
 			go s.handleChannels(channel)
 
 			sshConn.Wait()
-
 			glog.Infof("Disconnection from %s %s", sshConn.User(), sshConn.RemoteAddr())
+
+			node.Clear()
 			s.RemoveNode(elem)
 		}()
 	}
@@ -269,12 +280,13 @@ func (s *Server) AddNode(n *Node) *list.Element {
 		for {
 			select {
 			case <-n.ticker.C:
-				_, _, err := n.conn.SendRequest("keepalive", true, nil)
-				if err != nil {
+				ret, _, err := n.conn.SendRequest("keepalive", true, nil)
+				if err != nil || !ret {
 					n.conn.Close()
 					return
 				}
 
+				glog.V(2).Infof("keep alive %s", time.Now())
 				n.Heartbeat = time.Now()
 			}
 		}
@@ -358,4 +370,3 @@ func (s *Server) registerAgent(listener *net.TCPListener, node *Node, msg ssh.Na
 	node.AddForwarding(msg, listener)
 	go ssh.ForwardTraffic(listener, node.conn)
 }
-
