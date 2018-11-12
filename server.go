@@ -14,22 +14,6 @@ import (
 	"time"
 )
 
-// Forward indicates the forward mapping
-type Forward struct {
-	// Name of the forward
-	Name string
-	// Left is the addr that server listens on
-	Left *net.TCPAddr
-	// Right is the addr that agent listens on
-	Right string
-
-	listener *net.TCPListener
-}
-
-func (f *Forward) Format(s fmt.State, c rune) {
-	fmt.Fprintf(s, "%s [%s=>%s]", f.Name, f.Left, f.Right)
-}
-
 // Node represents an agent registered in server
 type Node struct {
 	// id of the agent
@@ -68,6 +52,7 @@ func (n *Node) AddForwarding(msg ssh.NamedTunnelForwardMsg, listener *net.TCPLis
 		Name:     msg.Name,
 		Left:     listener.Addr().(*net.TCPAddr),
 		Right:    msg.Right,
+		Options:  msg.Options,
 		listener: listener,
 	}
 

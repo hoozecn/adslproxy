@@ -1,6 +1,7 @@
 package adslproxy
 
 import (
+	"fmt"
 	"net"
 	"time"
 )
@@ -37,4 +38,22 @@ func (c *Conn) Write(b []byte) (int, error) {
 		return 0, err
 	}
 	return c.Conn.Write(b)
+}
+
+// Forward indicates the forward mapping
+type Forward struct {
+	// Name of the forward
+	Name string
+	// Left is the addr that server listens on
+	Left *net.TCPAddr
+	// Right is the addr that agent listens on
+	Right string
+
+	Options string
+
+	listener *net.TCPListener
+}
+
+func (f *Forward) Format(s fmt.State, c rune) {
+	fmt.Fprintf(s, "%s [%s=>%s]", f.Name, f.Left, f.Right)
 }

@@ -9,9 +9,10 @@ import (
 )
 
 type forwardPojo struct {
-	Name  string `json:"name"`
-	Left  string `json:"left"`
-	Right string `json:"right"`
+	Name    string `json:"name"`
+	Left    string `json:"left"`
+	Right   string `json:"right"`
+	Options string `json:"options"`
 }
 
 type nodePojo struct {
@@ -62,9 +63,10 @@ func (s *Server) ListNodesApi() func(w http.ResponseWriter, r *http.Request) {
 			var forwardList []forwardPojo
 			for _, forward := range node.ForwardList {
 				forwardList = append(forwardList, forwardPojo{
-					Name:  forward.Name,
-					Left:  forward.Left.String(),
-					Right: forward.Right,
+					Name:    forward.Name,
+					Left:    forward.Left.String(),
+					Right:   forward.Right,
+					Options: forward.Options,
 				})
 			}
 

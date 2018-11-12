@@ -34,12 +34,13 @@ type Agent struct {
 	proxyCredential    *ProxyCredential
 }
 
-func NewForward(name, left, right string) (*Forward, error) {
+func NewForward(name, left, right, options string) (*Forward, error) {
 	leftAddr, err := net.ResolveTCPAddr("tcp", left)
 	return &Forward{
-		Left:  leftAddr,
-		Right: right,
-		Name:  name,
+		Left:    leftAddr,
+		Right:   right,
+		Name:    name,
+		Options: options,
 	}, err
 }
 
@@ -119,14 +120,24 @@ func (a *Agent) Start() error {
 
 	if a.proxyCredential != nil {
 		addr := a.StartHttpProxy()
-		f, _ := NewForward("http", "[::]:0", fmt.Sprintf("localhost:%d", addr.Port), )
+		f, _ := NewForward(
+			"http",
+			"[::]:0",
+			fmt.Sprintf("localhost:%d", addr.Port),
+			a.proxyCredential.String(),
+		)
 		forwardList = append(forwardList, f)
 		defer a.StopHttpProxy()
 	}
 
 	if a.proxyCredential != nil {
 		addr := a.StartSocksProxy()
-		f, _ := NewForward("socks5", "[::]:0", fmt.Sprintf("localhost:%d", addr.Port), )
+		f, _ := NewForward(
+			"socks5",
+			"[::]:0",
+			fmt.Sprintf("localhost:%d", addr.Port),
+			a.proxyCredential.String(),
+		)
 		forwardList = append(forwardList, f)
 		defer a.StopSocks5Proxy()
 	}
@@ -175,7 +186,7 @@ func (a *Agent) Start() error {
 	wg.Add(len(forwardList))
 
 	for _, forward := range forwardList {
-		listener, err := client.CreateTunnel(forward.Left, forward.Right, forward.Name)
+		listener, err := client.CreateTunnel(forward.Left, forward.Right, forward.Name, forward.Options)
 		if err != nil {
 			glog.Errorf("failed to listen to server port %s %s", forward.Right, err)
 			return err
@@ -316,4 +327,12 @@ func (a *Agent) StopSocks5Proxy() {
 type ProxyCredential struct {
 	Username string
 	Password string
+}
+
+func (c *ProxyCredential) String() string {
+	if c.Username != "" {
+		return fmt.Sprintf("%s:%s", c.Username, c.Password)
+	}
+
+	return ""
 }

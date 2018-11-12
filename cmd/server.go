@@ -9,7 +9,7 @@ import (
 
 func main() {
 	sshPort := flag.Int("sshPort", 11222, "ssh port")
-	httpPort := flag.Int("sshPort", 11280, "ssh port")
+	httpPort := flag.Int("httpPort", 11280, "ssh port")
 	token := flag.String("token", "", "ssh port")
 
 	flag.Set("logtostderr", "true")

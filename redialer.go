@@ -1,6 +1,8 @@
 package adslproxy
 
 import (
+	"context"
+	"github.com/golang/glog"
 	"github.com/pkg/errors"
 	"os/exec"
 	"regexp"
@@ -8,18 +10,52 @@ import (
 	"time"
 )
 
+func runWinCommand(to time.Duration, name string, arg ...string) ([]byte, error) {
+	ctx := context.Background()
+	ctx, _ = context.WithTimeout(ctx, to)
+	cmd := exec.CommandContext(ctx, name, arg...)
+	output, err := cmd.CombinedOutput()
+
+	return output, err
+}
+
+const RASDIAL = "rasdial"
+
+func winConnect(to time.Duration, name, username, password string) error {
+	output, err := runWinCommand(to, RASDIAL, name, username, password)
+	if err != nil {
+		return err
+	}
+
+	glog.Infof("adsl connect result :%s", string(output))
+	return nil
+}
+
+func winDisconnect(to time.Duration, name string) error {
+	output, err := runWinCommand(to, RASDIAL, name, "/DISCONNECT")
+	if err != nil {
+		return err
+	}
+
+	glog.Infof("adsl disconnect result :%s", string(output))
+	return nil
+}
+
 type Redialer interface {
-	Redial() error
+	Redial(config *AdslConfig) error
 }
 
 type WindowsRedialer struct {
-	username      string
-	password      string
-	interfaceName string
 }
 
-func (wr *WindowsRedialer) Redial() error {
-	return nil
+func (wr *WindowsRedialer) Redial(c *AdslConfig) error {
+	err := winDisconnect(10*time.Second, c.InterfaceName)
+	if err != nil {
+		return err
+	}
+
+	err = winConnect(10*time.Second, c.InterfaceName, c.Username, c.Password)
+	return err
 }
 
 const DefaultPppoeStartScript = "/usr/sbin/pppoe-start"
@@ -67,7 +103,7 @@ func checkRoute() error {
 type CentosRedialer struct {
 }
 
-func (wr *CentosRedialer) Redial() error {
+func (wr *CentosRedialer) Redial(_ *AdslConfig) error {
 	runBashScript(DefaultPppoeStopScript, "Stop pppoe")
 
 	if err := runBashScript(DefaultPppoeStartScript, "Start pppoe"); err != nil {
@@ -89,16 +125,9 @@ type AdslConfig struct {
 func (ac *AdslConfig) Redial() error {
 	switch runtime.GOOS {
 	case "windows":
-		dialer := &WindowsRedialer{
-			ac.Username,
-			ac.Password,
-			ac.InterfaceName,
-		}
-
-		return dialer.Redial()
+		return WindowsRedialer{}.Redial(ac)
 	case "linux":
-		dialer := &CentosRedialer{}
-		return dialer.Redial()
+		return CentosRedialer{}.Redial(ac)
 	default:
 		return errors.Errorf("Not supported os %s", runtime.GOOS)
 	}
