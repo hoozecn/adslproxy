@@ -29,9 +29,9 @@ type Agent struct {
 
 	connectMutex sync.Mutex
 
-	httpProxyListener  net.Listener
 	socksProxyListener net.Listener
 	proxyCredential    *ProxyCredential
+	httpProxyServer    *http.Server
 }
 
 func NewForward(name, left, right, options string) (*Forward, error) {
@@ -48,15 +48,15 @@ func NewAgent(
 	user, password string,
 	serverAddr *net.TCPAddr,
 	adslConfig *AdslConfig,
-	credential *ProxyCredential,
-	forwards ... *Forward,
+	proxyCredential *ProxyCredential,
+	forwards ...*Forward,
 ) *Agent {
 	var config *ssh.ClientConfig
 	id := uuid.New().String()
 
 	config = &ssh.ClientConfig{
 		User:            user + "@" + id,
-		Auth:            []ssh.AuthMethod{ssh.Password(password),},
+		Auth:            []ssh.AuthMethod{ssh.Password(password)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         ClientConnectTimeout,
 	}
@@ -66,7 +66,7 @@ func NewAgent(
 		ForwardList:     forwards,
 		serverAddr:      serverAddr,
 		adslConfig:      adslConfig,
-		proxyCredential: credential,
+		proxyCredential: proxyCredential,
 	}
 }
 
@@ -111,6 +111,39 @@ func (a *Agent) SshRequestHandler(c ssh.Conn, reqs <-chan *ssh.Request) {
 			req.Reply(true, nil)
 		}
 	}
+}
+
+type activeConnManager struct {
+	conns map[net.Conn]bool
+	lock  sync.Mutex
+}
+
+func newActiveConnManager() *activeConnManager {
+	return &activeConnManager{
+		conns: make(map[net.Conn]bool),
+	}
+}
+
+func (am *activeConnManager) add(conn net.Conn) {
+	am.lock.Lock()
+	defer am.lock.Unlock()
+
+	am.conns[conn] = true
+}
+
+func (am *activeConnManager) clear() {
+	am.lock.Lock()
+	defer am.lock.Unlock()
+
+	for conn, _ := range am.conns {
+		conn.Close()
+	}
+}
+func (am *activeConnManager) remove(conn net.Conn) {
+	am.lock.Lock()
+	defer am.lock.Unlock()
+
+	delete(am.conns, conn)
 }
 
 func (a *Agent) Start() error {
@@ -185,6 +218,9 @@ func (a *Agent) Start() error {
 	wg := sync.WaitGroup{}
 	wg.Add(len(forwardList))
 
+	am := newActiveConnManager()
+	defer am.clear()
+
 	for _, forward := range forwardList {
 		listener, err := client.CreateTunnel(forward.Left, forward.Right, forward.Name, forward.Options)
 		if err != nil {
@@ -213,6 +249,8 @@ func (a *Agent) Start() error {
 				}
 
 				go func() {
+					am.add(remote)
+					defer am.remove(remote)
 					defer remote.Close()
 
 					// Open a (local) connection to localEndpoint whose content will be forwarded so serverEndpoint
@@ -222,6 +260,8 @@ func (a *Agent) Start() error {
 						return
 					}
 
+					am.add(local)
+					defer am.remove(local)
 					defer local.Close()
 
 					chDone := make(chan bool, 1)
@@ -284,10 +324,9 @@ func (a *Agent) StartHttpProxy() *net.TCPAddr {
 			})
 		}
 
-		http.Serve(l, proxy)
+		a.httpProxyServer = &http.Server{Handler: proxy}
+		a.httpProxyServer.Serve(l)
 	}()
-
-	a.httpProxyListener = l
 
 	return l.Addr().(*net.TCPAddr)
 }
@@ -317,7 +356,10 @@ func (a *Agent) StartSocksProxy() *net.TCPAddr {
 }
 
 func (a *Agent) StopHttpProxy() {
-	a.httpProxyListener.Close()
+	if a.httpProxyServer != nil {
+		a.httpProxyServer.Close()
+		glog.V(2).Infof("http proxy server is closed")
+	}
 }
 
 func (a *Agent) StopSocks5Proxy() {

@@ -125,9 +125,9 @@ type AdslConfig struct {
 func (ac *AdslConfig) Redial() error {
 	switch runtime.GOOS {
 	case "windows":
-		return WindowsRedialer{}.Redial(ac)
+		return (&WindowsRedialer{}).Redial(ac)
 	case "linux":
-		return CentosRedialer{}.Redial(ac)
+		return (&CentosRedialer{}).Redial(ac)
 	default:
 		return errors.Errorf("Not supported os %s", runtime.GOOS)
 	}
